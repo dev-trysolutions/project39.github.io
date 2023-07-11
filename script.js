@@ -1,215 +1,201 @@
-let renderer,
-scene,
-camera,
-sphereBg,
-nucleus,
-stars,
-controls,
-container = document.getElementById("canvas_container"),
-timeout_Debounce,
-noise = new SimplexNoise(),
-cameraSpeed = 0,
-blobScale = 3;
+import gsap from 'https://cdn.skypack.dev/gsap@3.11.0';
+
+console.clear();
+
+const CANVAS = document.querySelector('#rain');
+
+const DEFAULT_OPTIONS = {
+  size: () => window.innerWidth * 0.015,
+  family: 'JetBrains Mono, monospace',
+  fps: 24,
+  hue: 120,
+  limiter: 0.25,
+  glyphs:
+  'ラドクリフマラソンわたしワタシんょンョたばこタバコとうきょうトウキョウ0123456789±!@#$%^&*()_+ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  // glyphs: '01'
+};
 
 
-init();
-animate();
+const DigitalRain = function (el, options) {
+  if (el.tagName !== 'CANVAS') return console.error('Need a canvas element');
+  const self = this;
+  self.__ratio = window.devicePixelRatio || 1;
+  self.canvas = el;
+  self.options = options;
+  self.size = options.size;
+  self.glyphs = self.options.glyphs.split('');
+  self.context = el.getContext('2d');
+  self.setSize();
+  self.setTracker();
+  self.init();
+  return self;
+};
 
+// Sending back a column Object that represents the state of a column
+DigitalRain.prototype.setColumn = function (column = {}) {
+  const self = this;
+  const { glyphs } = self;
+  // Set a destination and record len && lastLen
+  const len = gsap.utils.random(6, self.rows, 1);
+  const lastLen = column.len || len;
+  // const destination = self.rows + len
+  const destination = gsap.utils.random(self.rows * 0.1, self.rows + len, 1);
+  const lastDestination = column.destination || destination;
+  // Tracking the last Destination needs a tail off to roll out the old stream
+  const tailEnd = lastDestination + lastLen;
 
-function init() {
-    scene = new THREE.Scene();
+  // If you have column.chars reuse else reset up to destination
+  let chars = column.chars || [];
 
-    camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.01, 1000)
-    camera.position.set(0,0,230);
+  // When you come in, cache the last set of chars
+  let cacheChars = [...chars];
 
-    const directionalLight = new THREE.DirectionalLight("#fff", 2);
-    directionalLight.position.set(0, 50, -20);
-    scene.add(directionalLight);
-
-    let ambientLight = new THREE.AmbientLight("#ffffff", 1);
-    ambientLight.position.set(0, 20, 20);
-    scene.add(ambientLight);
-
-    renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        alpha: true
-    });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
-
-    //OrbitControl
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 4;
-    controls.maxDistance = 350;
-    controls.minDistance = 150;
-    controls.enablePan = false;
-
-    const loader = new THREE.TextureLoader();
-    const textureSphereBg = loader.load('https://i.ibb.co/4gHcRZD/bg3-je3ddz.jpg');
-    const texturenucleus = loader.load('https://i.ibb.co/hcN2qXk/star-nc8wkw.jpg');
-    const textureStar = loader.load("https://i.ibb.co/ZKsdYSz/p1-g3zb2a.png");
-    const texture1 = loader.load("https://i.ibb.co/F8by6wW/p2-b3gnym.png");  
-    const texture2 = loader.load("https://i.ibb.co/yYS2yx5/p3-ttfn70.png");
-    const texture4 = loader.load("https://i.ibb.co/yWfKkHh/p4-avirap.png");
-
-
-    /*  Nucleus  */   
-    texturenucleus.anisotropy = 16;
-    let icosahedronGeometry = new THREE.IcosahedronGeometry(30, 10);
-    let lambertMaterial = new THREE.MeshPhongMaterial({ map: texturenucleus });
-    nucleus = new THREE.Mesh(icosahedronGeometry, lambertMaterial);
-    scene.add(nucleus);
-
-
-    /*    Sphere  Background   */
-    textureSphereBg.anisotropy = 16;
-    let geometrySphereBg = new THREE.SphereBufferGeometry(150, 40, 40);
-    let materialSphereBg = new THREE.MeshBasicMaterial({
-        side: THREE.BackSide,
-        map: textureSphereBg,
-    });
-    sphereBg = new THREE.Mesh(geometrySphereBg, materialSphereBg);
-    scene.add(sphereBg);
-
-
-    /*    Moving Stars   */
-    let starsGeometry = new THREE.Geometry();
-
-    for (let i = 0; i < 50; i++) {
-        let particleStar = randomPointSphere(150); 
-
-        particleStar.velocity = THREE.MathUtils.randInt(50, 200);
-
-        particleStar.startX = particleStar.x;
-        particleStar.startY = particleStar.y;
-        particleStar.startZ = particleStar.z;
-
-        starsGeometry.vertices.push(particleStar);
+  chars = new Array(Math.max(destination, chars.length)).fill().map((entry, index) => {
+    if (index <= destination) {
+      return self.glyphs[gsap.utils.random(0, self.glyphs.length - 1, 1)];
+    } else {
+      return cacheChars[index];
     }
-    let starsMaterial = new THREE.PointsMaterial({
-        size: 5,
-        color: "#ffffff",
-        transparent: true,
-        opacity: 0.8,
-        map: textureStar,
-        blending: THREE.AdditiveBlending,
-    });
-    starsMaterial.depthWrite = false;  
-    stars = new THREE.Points(starsGeometry, starsMaterial);
-    scene.add(stars);
+  });
 
+  const row = gsap.utils.random(-self.rows, -1, 1);
 
-    /*    Fixed Stars   */
-    function createStars(texture, size, total) {
-        let pointGeometry = new THREE.Geometry();
-        let pointMaterial = new THREE.PointsMaterial({
-            size: size,
-            map: texture,
-            blending: THREE.AdditiveBlending,                      
-        });
+  // column.hue = column.hue || gsap.utils.random(0, 359, 1)
 
-        for (let i = 0; i < total; i++) {
-            let radius = THREE.MathUtils.randInt(149, 70); 
-            let particles = randomPointSphere(radius);
-            pointGeometry.vertices.push(particles);
-        }
-        return new THREE.Points(pointGeometry, pointMaterial);
+  return {
+    ...column,
+    chars,
+    cacheChars,
+    destination,
+    lastDestination,
+    lastLen,
+    tailEnd,
+    tailCounter: lastDestination,
+    row,
+    len };
+
+};
+
+DigitalRain.prototype.setTracker = function () {
+  const self = this;
+  self.tracker = new Array(self.columns).fill().map(() => self.setColumn());
+};
+
+DigitalRain.prototype.reset = function () {
+  const self = this;
+  self.context.clearRect(0, 0, self.canvas.width, self.canvas.height);
+  self.setSize();
+  self.setTracker();
+};
+
+DigitalRain.prototype.init = function () {
+  const self = this;
+  self.renderMatrix = () => self.render();
+  self.resetOnSize = () => self.reset();
+  window.addEventListener('resize', self.resetOnSize);
+  gsap.ticker.add(self.renderMatrix);
+  gsap.ticker.fps(self.options.fps);
+  self.pause = () => {
+    gsap.ticker.remove(self.renderMatrix);
+  };
+  self.play = () => {
+    gsap.ticker.add(self.renderMatrix);
+  };
+};
+
+DigitalRain.prototype.getColor = function (
+x,
+y,
+{
+  hue,
+  row,
+  len,
+  lastLen,
+  lastDestination,
+  tailCounter })
+
+{
+  const self = this;
+  // If y > row but less than last destination, work out the color as if row === column.lastDestination
+  const lower = 0.1;
+  const upper = 1;
+  let alpha = 0.1;
+
+  if (y <= row) {
+    alpha = gsap.utils.clamp(
+    lower,
+    upper,
+    gsap.utils.mapRange(-len, 0, lower, upper)(y - row));
+
+  } else if (y > row && y <= lastDestination) {
+    alpha = gsap.utils.clamp(
+    lower,
+    upper,
+    gsap.utils.mapRange(-lastLen, 0, lower, upper)(y - tailCounter));
+
+  } else if (y > lastDestination) {
+    alpha = lower;
+  }
+  return `hsl(${hue || self.options.hue}, 100%, ${row === y ? 100 : 70}%, ${alpha})`;
+};
+
+DigitalRain.prototype.render = function () {
+  const self = this;
+  self.context.clearRect(0, 0, self.canvas.width, self.canvas.height);
+  // Need to try and iterate over every cell in the Matrix...
+  for (let c = 0; c < self.characters; c++) {
+    const x = c % self.columns;
+    const y = Math.floor(c / self.columns);
+    const column = self.tracker[x];
+
+    // On the first row, let's bump the index
+    if (y === 0 && Math.random() > 0.1) {
+      column.row += 1;
     }
-    scene.add(createStars(texture1, 15, 20));   
-    scene.add(createStars(texture2, 5, 5));
-    scene.add(createStars(texture4, 7, 5));
 
-
-    function randomPointSphere (radius) {
-        let theta = 2 * Math.PI * Math.random();
-        let phi = Math.acos(2 * Math.random() - 1);
-        let dx = 0 + (radius * Math.sin(phi) * Math.cos(theta));
-        let dy = 0 + (radius * Math.sin(phi) * Math.sin(theta));
-        let dz = 0 + (radius * Math.cos(phi));
-        return new THREE.Vector3(dx, dy, dz);
+    if (column.tailCounter !== column.tailOff && y === 0) {
+      column.tailCounter += 1;
     }
-}
+
+    const row = column.row;
+    const chars = column[y > row ? 'cacheChars' : 'chars'];
+
+    self.context.fillStyle = self.getColor(x, y, column);
 
 
-function animate() {
+    if (chars[y]) {
+      if (Math.random() > 0.999 && y > row) {
+        column.cacheChars[y] = column.chars[y] = '';
+      }
+      if (Math.random() > 0.99 && y < row && y < column.destination && y > column.destination - column.len) {
+        column.cacheChars[y] = column.chars[y] = self.glyphs[gsap.utils.random(0, self.glyphs.length - 1, 1)];
+      }
+      self.context.fillText(
+      chars[y],
+      (x + 0.5) * self.fontSize,
+      (y + 1) * self.fontSize);
 
-    //Stars  Animation
-    stars.geometry.vertices.forEach(function (v) {
-        v.x += (0 - v.x) / v.velocity;
-        v.y += (0 - v.y) / v.velocity;
-        v.z += (0 - v.z) / v.velocity;
+    }
+    // Reset the column if we go past destination
+    if (row > column.destination) {
+      self.tracker[x] = self.setColumn(column);
+    }
+  }
+};
 
-        v.velocity -= 0.3;
+DigitalRain.prototype.setSize = function () {
+  const self = this;
+  const { height, width } = self.canvas.getBoundingClientRect();
+  self.canvas.height = height * self.__ratio;
+  self.canvas.width = width * self.__ratio;
+  // Set the font size and get the rows/columns
+  self.fontSize = Math.ceil(typeof self.size === 'function' ? self.size() : self.size);
+  self.columns = Math.ceil(self.canvas.width / self.fontSize);
+  // self.columns = 1
+  self.rows = Math.ceil(self.canvas.height / self.fontSize);
+  self.characters = self.rows * self.columns;
+  self.context.font = `${self.fontSize}px ${self.options.family}`;
+  self.context.textAlign = 'center';
+};
 
-        if (v.x <= 5 && v.x >= -5 && v.z <= 5 && v.z >= -5) {
-            v.x = v.startX;
-            v.y = v.startY;
-            v.z = v.startZ;
-            v.velocity = THREE.MathUtils.randInt(50, 300);
-        }
-    });
-
-
-    //Nucleus Animation
-    nucleus.geometry.vertices.forEach(function (v) {
-        let time = Date.now();
-        v.normalize();
-        let distance = nucleus.geometry.parameters.radius + noise.noise3D(
-            v.x + time * 0.0005,
-            v.y + time * 0.0003,
-            v.z + time * 0.0008
-        ) * blobScale;
-        v.multiplyScalar(distance);
-    })
-    nucleus.geometry.verticesNeedUpdate = true;
-    nucleus.geometry.normalsNeedUpdate = true;
-    nucleus.geometry.computeVertexNormals();
-    nucleus.geometry.computeFaceNormals();
-    nucleus.rotation.y += 0.002;
-
-
-    //Sphere Beckground Animation
-    sphereBg.rotation.x += 0.002;
-    sphereBg.rotation.y += 0.002;
-    sphereBg.rotation.z += 0.002;
-
-    
-    controls.update();
-    stars.geometry.verticesNeedUpdate = true;
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-}
-
-
-
-/*     Resize     */
-window.addEventListener("resize", () => {
-    clearTimeout(timeout_Debounce);
-    timeout_Debounce = setTimeout(onWindowResize, 80);
-});
-function onWindowResize() {
-    camera.aspect = container.clientWidth / container.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
-}
-
-
-
-/*     Fullscreen btn     */
-// let fullscreen;
-// let fsEnter = document.getElementById('fullscr');
-// fsEnter.addEventListener('click', function (e) {
-//     e.preventDefault();
-//     if (!fullscreen) {
-//         fullscreen = true;
-//         document.documentElement.requestFullscreen();
-//         fsEnter.innerHTML = "Exit Fullscreen";
-//     }
-//     else {
-//         fullscreen = false;
-//         document.exitFullscreen();
-//         fsEnter.innerHTML = "Go Fullscreen";
-//     }
-// });
+window.myDigitalRain = new DigitalRain(CANVAS, DEFAULT_OPTIONS);
